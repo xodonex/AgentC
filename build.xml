@@ -1,0 +1,78 @@
+<?xml version="1.0"?>
+<project name="AgentC" default="compile_demo" basedir=".">
+  <description>
+    Build file for the AgentC Toolkit and demo.
+  </description>
+
+  <property name="src" location="src"/>
+  <property name="build" location="build"/>
+  <property name="doc" location="doc"/>
+  <property name="lib" location="lib"/>
+  <property name="jar_act" location="${lib}/act.jar"/>
+  <property name="src_demo" location="demo"/>
+  <property name="src_agentc" location="${src_demo}/players"/>
+  <property name="package_players" value="players"/>
+  <property name="src_players" location="players"/>
+  <property name="class_player_base" value="dk.dtu.imm.cse.agent.act.demo.DemoAcme"/>
+
+  <target name="init">
+    <tstamp/>
+    <mkdir dir="${build}"/>
+  </target>
+
+  <target name="clean">
+    <delete dir="${build}"/>
+    <delete dir="${lib}"/>
+    <delete dir="${src_players}"/>
+    <delete dir="${doc}"/>
+	<delete file="${src_demo}/Demo.class"/>
+  </target>
+
+  <target name="compile_lib" depends="init">
+    <javac srcdir="${src}" destdir="${build}" includeantruntime="false"/>
+  </target>
+
+  <target name="lib" depends="compile_lib">
+    <mkdir dir="${lib}"/>
+    <jar destfile="${jar_act}">
+      <fileset dir="${build}"/>
+      <manifest>
+        <attribute name="Main-Class" value="dk.dtu.imm.cse.agent.act.acc.Acc"/>
+      </manifest>
+    </jar>
+  </target>
+
+  <target name="doc" depends="init">
+    <mkdir dir="${doc}"/>
+    <javadoc sourcepath="${src}" destdir="${doc}"
+             Doctitle="AgentC Toolkit reference documentation"/>
+  </target>
+
+  <target name="generate_players" depends="lib">
+    <mkdir dir="${src_players}"/>
+    <exec executable="java">
+      <arg line="-jar ${jar_act} -o ${src_players}/Cautious.java -ext ${class_player_base} -pck ${package_players} ${src_agentc}/Cautious.ac ${src_agentc}/common.ac"/>
+    </exec>
+    <exec executable="java">
+      <arg line="-jar ${jar_act} -o ${src_players}/Cowardly.java -ext ${class_player_base} -pck ${package_players} ${src_agentc}/Cowardly.ac ${src_agentc}/common.ac"/>
+    </exec>
+    <exec executable="java">
+      <arg line="-jar ${jar_act} -o ${src_players}/Ruthless.java -ext ${class_player_base} -pck ${package_players} ${src_agentc}/Ruthless.ac ${src_agentc}/common.ac"/>
+    </exec>
+    <exec executable="java">
+      <arg line="-jar ${jar_act} -o ${src_players}/Vindictive.java -ext ${class_player_base} -pck ${package_players} ${src_agentc}/Vindictive.ac ${src_agentc}/common.ac"/>
+    </exec>
+  </target>
+
+  <target name="compile_players" depends="generate_players">
+    <javac srcdir="${src_players}" destdir="." includeantruntime="false"
+		   classpath="${jar_act}"/>
+  </target>
+
+  <target name="compile_demo" depends="compile_players">
+    <javac srcdir="${src_demo}" destdir="." includeantruntime="false"
+		   classpath="${jar_act}:."/>
+	<echo message="To run the demo, use the following command:"/>
+	<echo message="java -cp ${jar_act}:. demo/Demo"/>
+  </target> 
+</project>

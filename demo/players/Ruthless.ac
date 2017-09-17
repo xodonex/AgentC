@@ -1,0 +1,102 @@
+// Copyright 2002 Henrik Lauritzen
+/*
+  Copying and distribution of this file, with or without modification,
+  are permitted in any medium without royalty provided the copyright
+  notice and this notice are preserved.  This file is offered as-is,
+  without any warranty.
+*/
+
+/**
+ * A ruthless player.
+ */
+DEFS {
+	// the initial relation to all players
+	$INITIAL_RELATION = 0.25;
+}
+
+
+PROCEDURE inquire() {
+	// the ruthless player doesn't bother about making conversations.
+}
+
+
+PROCEDURE handleReply() {
+	// the replies are insignificant,
+}
+
+
+PROCEDURE handleNewMessage() {
+	// handle a request for switching alliance
+	WHEN [type=$REQUEST, from=?P, contents=#I relation(?p, ?l, ?u) AS ?c] {
+	 	IF (Q strengthOf(?P) > Q strengthOf(SELF)) {
+	 		IF (Q strengthOf(?p) < Q strengthOf(SELF)) {
+	 			// use the lowest value for a weaker player
+	 			CALL ensureMinimumRelation(?p, ?l);
+	 		}
+	 		ELSE {
+	 			// use the highest value, bounded by $HALF, for
+	 			// a stronger player
+	 			IF (?u > $HALF) {
+	 				CALL ensureMinimumRelation(?p, $HALF);
+	 			}
+	 			ELSE {
+	 				CALL adjustRelation(?p, ?u);
+	 			}
+	 		}
+	 		SAY [to=?P, type=$ACCEPT, contents=?c];
+	 	}
+	 	ELSE {
+	 		SAY [to=?P, type=$REJECT, contents=?c];
+	 	}
+	}
+}
+
+
+PROCEDURE giveOrders() {
+	// attack the player with the lowest relation, regardless of the absolute value.
+	// otherwise stick to the relations.
+	XEQ resetFriends();
+	LET ?minRelation = $ONE;
+	LET ?minPlayer = -1;
+
+	IF (#B relation(SELF, ?P, ?R)) {
+		IF (?R < ?minRelation) {
+			?minRelation = ?R;
+			?minPlayer = ?P;
+		}
+		IF (Q strengthOf(?P) > Q strengthOf(SELF), ?R > $ZERO) {
+			XEQ registerFriend(?P);
+		}
+	}
+
+	XEQ unregisterFriend(?minPlayer);
+
+
+	IF (!XEQ attack(Q add(0.50, Q random(0.2)))) {
+		XEQ defend();
+	}
+}
+
+
+PROCEDURE updateStatus() {
+	WHEN NOTHING {
+	 	// get ready for next turn
+ 		DROP #DID updateRelations();
+	}
+	WHEN [type=$PLAYER_ELIMINATED, contents=?X] {
+		DROP #B relation(SELF, ?X, _);
+		RETURN;
+	}
+	WHEN [type=$UNIT_ATTACKED, contents=?X] {
+		CALL adjustRelation(?X, $NEGHALF);
+		RETURN;
+	}
+	WHEN [type=$SUPPORT_CENTRE_ATTACKED, contents=?X] {
+		CALL adjustRelation(?X, -0.75);
+		RETURN;
+	}
+	WHEN [type=$SUPPORT_CENTRE_CONQUERED, contents=?X] {
+		CALL adjustRelation(?X, $NEGONE);
+		RETURN;
+	}
+}

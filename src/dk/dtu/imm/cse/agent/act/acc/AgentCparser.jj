@@ -1,0 +1,485 @@
+/**
+ * The AgentC parser
+ */
+
+options {
+  JAVA_UNICODE_ESCAPE = true;
+  IGNORE_CASE = false;
+  OPTIMIZE_TOKEN_MANAGER = true;
+  STATIC = false;
+}
+
+
+PARSER_BEGIN(AgentCparser)
+package dk.dtu.imm.cse.agent.act.acc;
+
+import java.util.*;
+
+import dk.dtu.imm.cse.agent.act.afc.*;
+
+
+public class AgentCparser implements AccConstants {
+
+	private ParseTree _tree;
+}
+
+PARSER_END(AgentCparser)
+
+
+
+SKIP : /* WHITE SPACE */
+{
+  <["\0"-" "]>
+}
+
+
+SKIP : /* COMMENTS */
+{
+  <"//" (~["\n","\r"])* ("\n"|"\r"|"\r\n")>
+| <"/*" (~["*"])* "*" (~["/"] (~["*"])* "*")* "/">
+}
+
+
+TOKEN : /* IDENTIFIER */
+{
+  < IDENTIFIER: (<IDENTIFIERSTART> (<LETTER>|<DIGIT>)*) >
+|
+  < #IDENTIFIERSTART: (["a"-"z"] | ("$" <LETTER>)) >
+|
+  < #LETTER: ["A"-"Z","a"-"z","_"] >
+|
+  < #DIGIT: ["0"-"9"] >
+}
+
+
+TOKEN : /* VARIABLE */
+{
+  < VARIABLE: ("?" <LETTER> (<LETTER>|<DIGIT>)*) | "_" >
+}
+
+
+TOKEN : /* ATTITUDE */
+{
+  < ATTITUDE: "#" <LETTER> (<LETTER>|<DIGIT>)* >
+}
+
+
+TOKEN : /* INTEGER */
+{
+  < INTEGER_LITERAL: "0" | (("-")? ["1"-"9"] (["0"-"9"])*) >
+}
+
+
+
+TOKEN : /* DOUBLE */
+{
+< DOUBLE_LITERAL:
+        ("-")? ((["0"-"9"])+ "." (["0"-"9"])* (<EXPONENT>)?
+      | "." (["0"-"9"])+ (<EXPONENT>)?
+      | (["0"-"9"])+ <EXPONENT>)
+ >
+|
+  < #EXPONENT: ["e","E"] (["+","-"])? (["0"-"9"])+ >
+}
+
+
+TOKEN : /* STRING */
+{
+  < STRING_LITERAL:
+      "\""
+      (   (~["\"","\\","\n","\r"])
+        | ("\\"
+            ( ["n","t","b","r","f","\\","'","\""]
+            | ["0"-"7"] ( ["0"-"7"] )?
+            | ["0"-"3"] ["0"-"7"] ["0"-"7"]
+            )
+          )
+      )*
+      "\""
+  >
+}
+
+
+// ***** PROGRAM *****
+
+
+/**
+ * Parses the whole AgentC program.
+ */
+ParseTree program(ParseTree t) :
+{
+  Token name;
+  List params;
+  Statement preceding = null, stm;
+  _tree = t;
+}
+{
+  ( ("ATTITUDES" "{" (attitudeDecl(t) ";")* "}")
+  | ("DEFS" "{" (def(t) ";")* "}")
+  | ("FACTS" "{" (initialFact(t) ";")* "}")
+  | ("PROCEDURE" name = identifier() params = paramList()
+  	((";" { t.addProcedure(name, params, null); }) |
+  	("{" { List l = new ArrayList(); preceding = null; }
+    (
+     (stm = messageRule() | stm = statement())
+    { AccUtils.checkReachability(preceding, stm);
+      preceding = stm;
+      l.add(stm);
+    }
+
+    )*) "}" { t.addProcedure(name, params, l); }))
+  )*
+  <EOF>
+
+  { return t; }
+}
+
+
+List paramList() throws ParseException :
+{
+  List result = new ArrayList();
+  Variable v;
+}
+{
+  ("(" [(v = variable() { result.add(v); })
+  	("," v = variable() {result.add(v); })* ] ")") { return result; }
+}
+
+/**
+ * Parses a single attitude declaration and adds the result to the
+ * given parse tree.
+ */
+void attitudeDecl(ParseTree t) throws ParseException :
+{
+  Token t1, t2;
+}
+{
+  (t1 = <ATTITUDE> "=" t2 = <INTEGER_LITERAL>)
+  { t.addAttitude(t1, Integer.parseInt(t2.image)); }
+}
+
+
+/**
+ * Parses a single definition and adds the result to the
+ * given parse tree.
+ */
+void def(ParseTree t) throws ParseException :
+{
+  Token tok;
+  Literal value;
+}
+{
+  (tok = identifier() "=" value = literal())
+  { t.addDef(tok, value); }
+}
+
+
+/**
+ * Parses a single initial fact and adds the result to the
+ * given list.
+ */
+void initialFact(ParseTree t) :
+{
+  Sentence s;
+}
+{
+  s = sentence()
+  { t.addFact(s); }
+}
+
+
+/**
+ * Parses a block of statements
+ */
+List block() :
+{
+  List result = new ArrayList();
+  Token errorToken = null;
+  Statement preceding = null, stm;
+}
+{
+  ("{"
+    ( stm = statement()
+      { AccUtils.checkReachability(preceding, stm);
+        preceding = stm;
+        result.add(stm);
+      })*
+    "}")
+  { return result; }
+}
+
+
+/**
+ * Parses a message guarded block
+ */
+MessageRule messageRule() :
+{
+  LinkedHashMap mGuard;
+  List block;
+}
+{
+  (("WHEN" mGuard = messageGuard() block = block())
+  { return new MessageRule(mGuard, block); })
+}
+
+
+LinkedHashMap messageGuard() :
+{
+  LinkedHashMap result = new LinkedHashMap();
+}
+{
+  ("[" [messagePatternBinding(result)
+      ("," messagePatternBinding(result))* ] "]"
+  {return result;})
+  | "NOTHING" { return null; }
+}
+
+
+void messagePatternBinding(Map result) :
+{
+  Token tok;
+  String key;
+  Value v;
+  Sentence s;
+  Variable alias;
+}
+{
+  (
+  (tok = identifier()
+    { key = tok.image;
+      if (result.containsKey(key)) {
+        AccUtils.throwParseException(tok,
+          "Duplicate message pattern \"" + key + "\"");
+      }
+    }
+   )
+  "="
+  (v = expression() | ( s = sentence() [ "AS" alias = variable() { s.setAlias(alias); } ] { v = s; }))
+  )
+  { result.put(key, v); }
+}
+
+
+Statement statement() :
+{
+  Map m;
+  Statement stm;
+  Variable var;
+  Value v;
+  Expression e;
+  Token tok;
+  List list;
+}
+{
+  ("ADOPT" v = sentenceOrVar() ";" { return new MentalUpdateStatement(true, v); })
+  | ("DROP" v = sentenceOrVar() ";" { return new MentalUpdateStatement(false, v); })
+  | ("SAY" m = messageGuard() ";" { return new SayStatement((LinkedHashMap)m); })
+  | (stm = ifStatement() { return stm; })
+  | ("LET" var = variable() "=" v = value() ";" { return new LetStatement(var, v); })
+  | ("LOCKED" list = block() { return new LockedStatement(list); })
+  | ("RETURN"
+      { e = null; tok = getToken(0); }
+      [ e = expression() ] ";"
+      { return new ReturnStatement(tok, e); })
+  | (stm = action() ";" { return stm; })
+  | ("CALL" tok = identifier() list = termList() ";"
+     { return new ProcedureCall(tok, list); })
+  | ( var = variable() "=" e = expression() ";" { return new Assignment(var, e); })
+}
+
+
+IfStatement ifStatement() :
+{
+  List conditions = new ArrayList(2);
+  List blocks = new ArrayList(2);
+  List l, l2;
+}
+{
+  (("IF" l = conditionList() l2 = block() { conditions.add(l); blocks.add(l2); })
+  ("ELSIF" l = conditionList() l2 = block() { conditions.add(l); blocks.add(l2); })*
+  ["ELSE" l = block() { conditions.add(null); blocks.add(l); }])
+  { return new IfStatement(conditions, blocks); }
+}
+
+
+List termList() :
+{
+  List result = new ArrayList(4);
+  Expression e;
+}
+{
+ ("(" [ e = expression() { result.add(e); }
+      ("," e = expression() { result.add(e); } )* ] ")")
+ { return result; }
+}
+
+
+Sentence sentence() :
+{
+  Token attitude;
+  List terms;
+  Token name;
+  int id;
+}
+{
+   (attitude = <ATTITUDE>
+   name = identifier()
+   terms = termList())
+  { return new Sentence(attitude, name.image, terms); }
+}
+
+
+Value sentenceOrVar() :
+{
+  Value v;
+}
+{
+  (v = sentence() | v = variable())
+  { return v; }
+}
+
+
+Action action() :
+{
+  Token name;
+  List l;
+  boolean isDo;
+}
+{
+  (("DO" { isDo = true; })
+  | ("XEQ" { isDo = false; }))
+
+  name = identifier() l = termList()
+  { return new Action(isDo, name.image, l); }
+}
+
+
+Condition condition() :
+{
+  Condition cond;
+  Expression e1, e2;
+  int comp;
+  List conditions;
+  Variable v;
+  Token t;
+}
+{
+  ((e1 = expression() comp = comparator() e2 = expression())
+      { return new Comparison(e1, comp, e2); })
+  | (t = "!" cond = condition() {
+      if (cond instanceof NotCondition) {
+        return ((NotCondition)cond).getCondition();
+      }
+      return new NotCondition(cond);
+    })
+  | (cond = sentence() [ "AS" v = variable() { ((Sentence)cond).setAlias(v); } ] { return cond; })
+  | (cond = action() { return cond; })
+  | ("(" cond = condition() ")" { return cond; })
+}
+
+
+int comparator() :
+{
+}
+{
+  ("==" { return COMP_EQ; })
+  | ("!=" { return COMP_NE; })
+  | ("<" { return COMP_LT; })
+  | ("<=" { return COMP_LE; })
+  | (">=" { return COMP_GE; })
+  | (">" { return COMP_GT; })
+}
+
+
+List conditionList() :
+{
+  List result = new ArrayList(3);
+  Condition c;
+}
+{
+  ("(" (c = condition() { result.add(c); }) ("," c = condition() { result.add(c); })* ")")
+  { return result; }
+}
+
+
+// ***** Expressions *****
+
+Expression expression() :
+{
+  Expression result;
+  Token tok;
+  List l;
+}
+{
+  (result = constant()
+  | result = literal()
+  | result = variable()
+  | result = query()
+  | ("SELF" {result = SelfRef.getInstance(); })
+  | ("CALL" tok = identifier() l = termList() { result = new ProcedureCall(tok, l); }))
+  { return result; }
+}
+
+
+Query query() :
+{
+  Token name;
+  List terms;
+}
+{
+  "Q" name = identifier() terms = termList() { return new Query(name.image, terms); }
+}
+
+Value value() :
+{
+  Value result;
+}
+{
+  (result = expression() | result = sentence())
+  { return result; }
+}
+
+
+Literal literal() :
+{ Token t;
+  int type;
+}
+{
+  (t = <STRING_LITERAL> { type = AccConstants.TYPE_STRING; }
+  | t = <INTEGER_LITERAL> { type = AccConstants.TYPE_INT; }
+  | t = <DOUBLE_LITERAL> { type = AccConstants.TYPE_DOUBLE; })
+  { return new Literal(type, t.image); }
+}
+
+
+Constant constant() :
+{
+  Token t;
+}
+{
+  t = identifier()
+  { return new Constant(t, _tree.isExternalDef(t.image)); }
+}
+
+
+Variable variable() :
+{
+  Token t;
+}
+{
+  t = <VARIABLE>
+  { return new Variable(t); }
+}
+
+
+Token identifier() :
+{ Token t; }
+{
+  t = <IDENTIFIER>
+  { if (t.image.charAt(0) == '$') {
+  	// remove the escape character
+  	t.image = t.image.substring(1);
+    }
+    return t;
+  }
+}

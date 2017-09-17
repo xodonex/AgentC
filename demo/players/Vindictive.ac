@@ -1,0 +1,134 @@
+// Copyright 2002 Henrik Lauritzen
+/*
+  Copying and distribution of this file, with or without modification,
+  are permitted in any medium without royalty provided the copyright
+  notice and this notice are preserved.  This file is offered as-is,
+  without any warranty.
+*/
+
+/**
+ * The vindictive player.
+ */
+DEFS {
+	// the initial relation to all players
+	$INITIAL_RELATION = 0.75;
+}
+
+
+PROCEDURE inquire() {
+	// all inquiries have been sent for this turn - don't make further conversations
+	IF (#DID sendMessages()) {
+		RETURN;
+	}
+
+	// Send a petition to all friendly players to attack the enemies
+	IF (#B relation(SELF, ?E, ?er), ?er < $ZERO,
+			#B relation(SELF, ?F, ?fr), ?fr > $ZERO) {
+		SAY [to = ?F, type = $REQUEST,
+				contents = #I relation(?E, $NEGONE, $ZERO)];
+	}
+
+	// don't make further conversations
+	ADOPT #DID sendMessages();
+}
+
+
+PROCEDURE handleReply() {
+	// don't care about replies - they don't affect the behaviour.
+}
+
+PROCEDURE handleNewMessage() {
+	// handle a request for switching alliance
+	WHEN [type=$REQUEST, from=?P, contents=#I relation(?p, ?l, ?u) AS ?c] {
+		IF (#B relation(SELF, ?P, ?r), ?r >= $ZERO) {
+			// the sender is friendly: try to honour the request
+			IF (#B relation(SELF, ?p, ?pr) AS ?o) {
+				IF (?pr <= $ZERO) {
+					IF (?l > $ZERO) {
+						// can't forgive enemy ?p : reject
+						SAY [type=$REJECT, to=?P, contents=?c];
+					}
+					ELSE {
+						// accept the lower bound for the
+						// relation (it is not larger than 0.0)
+						DROP ?o;
+						ADOPT #B relation(SELF, ?p, ?l);
+						SAY [type=$ACCEPT, to=?P, contents=?c];
+					}
+				}
+				ELSIF (?l > 0.0) {
+					// accept the lower bound if the player
+					// relation is friendly
+					CALL ensureMinimumRelation(?p, ?l);
+					SAY [type=$ACCEPT, to=?P, contents=?c];
+				}
+				ELSE {
+					// don't make enemies just because it is
+					// suggested
+					SAY [type=$REJECT, to=?P, contents=?c];
+				}
+			}
+		}
+		ELSE {
+			// reject all enemies
+			SAY [type=$REJECT, to=?P, contents=?c];
+		}
+		RETURN;
+	}
+}
+
+
+PROCEDURE giveOrders() {
+	// calculate a new set of friendly players
+	XEQ resetFriends();
+	IF (#B relation(SELF, ?P, ?R), ?R >= $ZERO) {
+		IF (#DID attack(?R)) {
+			// ?P has previously attacked a support centre -
+			// this is not forgotten: consider the player
+			// friendly only half of the time, even if relations
+			// are good
+			IF (Q random() < $HALF) {
+				XEQ registerFriend(?P);
+			}
+		}
+		ELSE {
+			// ?P has never attacked support centres -
+			// consider ?P a loyal friend.
+			XEQ registerFriend(?P);
+		}
+	}
+	// else the player is an enemy
+
+
+	IF (!XEQ attack(Q add(0.60, Q random(0.15)))) {
+		XEQ defend();
+	}
+}
+
+
+PROCEDURE updateStatus() {
+	WHEN NOTHING {
+	 	// get ready for the next round
+	 	DROP #DID sendMessages();
+		RETURN;
+	}
+	WHEN [type=$PLAYER_ELIMINATED, contents=?X] {
+		DROP #B relation(SELF, ?X, _);
+		RETURN;
+	}
+	WHEN [type=$UNIT_ATTACKED, contents=?X] {
+		CALL adjustRelation(?X, $NEGHALF);
+		RETURN;
+	}
+	WHEN [type=$SUPPORT_CENTRE_ATTACKED, contents=?X] {
+		CALL adjustRelation(?X, -0.75);
+		ADOPT #DID attack(?X);
+		RETURN;
+	}
+	WHEN [type=$SUPPORT_CENTRE_CONQUERED, contents=?X] {
+		// subtract 2.0 from the relation: this means WAR!
+		CALL adjustRelation(?X, -2.0);
+		ADOPT #DID attack(?X);
+		RETURN;
+	}
+}

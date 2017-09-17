@@ -1,0 +1,115 @@
+// Copyright 2002 Henrik Lauritzen
+/*
+  Copying and distribution of this file, with or without modification,
+  are permitted in any medium without royalty provided the copyright
+  notice and this notice are preserved.  This file is offered as-is,
+  without any warranty.
+*/
+
+/**
+ * The cautious player.
+ */
+DEFS {
+	// the initial relation to all players
+	$INITIAL_RELATION = 1.0;
+
+	$EIGHTH = 0.125;
+}
+
+
+PROCEDURE inquire() {
+	IF (#DID finishInquiries()) {
+		RETURN;
+	}
+
+	IF (#B relation(SELF, ?p, _)) {
+		IF (#DID attack(?p) AS ?a) {
+		 	// ask the offending player to cease its attacks
+		 	DROP ?a;
+	 		SAY [to=?p, type=$REQUEST, contents=#I relation(SELF, $ZERO, $ONE)];
+		}
+		ELSE {
+			// improve relations with players which did not attack in
+			// the last turn
+			CALL adjustRelation(?p, $EIGHTH);
+		}
+	}
+
+	ADOPT #DID finishInquiries();
+}
+
+
+PROCEDURE handleReply() {
+	WHEN [type=$REJECT, from=?X] {
+	 	// the player rejected the peace offer - reduce the relation
+	 	CALL adjustRelation(?X, $NEGQUART);
+	 	RETURN;
+	}
+
+	// don't give any credit for accepting the request - the
+	// absence of attacks is the only way to improve relations
+}
+
+PROCEDURE handleNewMessage() {
+	WHEN [type=$REQUEST, from=?P, contents=#I relation(?p, ?l, ?u) AS ?c] {
+		// Accept only requests from friendly players
+	 	IF (#B relation(SELF, ?P, ?R), ?R >= $ZERO, #B relation(SELF, ?p, ?r)) {
+	 		IF (?r <= ?l) {
+	 			// always accept to improve relations
+		 		CALL ensureMinimumRelation(?p, ?l);
+		 		SAY [to=?P, type=$ACCEPT, contents=?c];
+		 	}
+		 	ELSE {
+		 		// adjust relations to be as close to the
+		 		// request as possible, but do not go below
+		 		// $ZERO (i.e., don't engage in a new war)
+		 		CALL ensureMaximumRelation(?p, ?u);
+		 		CALL ensureMinimumRelation(?p, $ZERO);
+		 		SAY [to=?P, type=$ACCEPT, contents=?c];
+			}
+	 	}
+	 	ELSE {
+			SAY [to=?P, type=$REJECT, contents=?c];
+	 	}
+	 }
+}
+
+
+PROCEDURE giveOrders() {
+	XEQ resetFriends();
+	IF (#B relation(SELF, ?P, ?R), ?R >= $NEGQUART) {
+		XEQ registerFriend(?P);
+	}
+
+	IF (!XEQ attack(Q add(0.40, Q random(0.2)))) {
+		XEQ defend();
+	}
+}
+
+
+PROCEDURE updateStatus() {
+	WHEN NOTHING {
+		// reset the finished inquiry state
+		DROP #DID finishInquiries();
+		RETURN;
+	}
+	WHEN [type=$PLAYER_ELIMINATED, contents=?X] {
+		DROP #B relation(SELF, ?X, _);
+		RETURN;
+	}
+	WHEN [type=$UNIT_ATTACKED, contents=?X] {
+		CALL adjustRelation(?X, $NEGHALF);
+		ADOPT #DID attack(?X);
+		RETURN;
+	}
+	WHEN [type=$SUPPORT_CENTRE_ATTACKED, contents=?X] {
+		CALL adjustRelation(?X, -0.75);
+		ADOPT #DID attack(?X);
+		RETURN;
+	}
+	WHEN [type=$SUPPORT_CENTRE_CONQUERED, contents=?X] {
+		CALL adjustRelation(?X, -1.5);
+		ADOPT #DID attack(?X);
+		RETURN;
+	}
+}

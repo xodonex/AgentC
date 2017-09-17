@@ -1,0 +1,116 @@
+// Copyright 2002 Henrik Lauritzen
+/*
+  Copying and distribution of this file, with or without modification,
+  are permitted in any medium without royalty provided the copyright
+  notice and this notice are preserved.  This file is offered as-is,
+  without any warranty.
+*/
+
+/**
+ * The cowardly player.
+ */
+DEFS {
+	// the initial relation to all players
+	$INITIAL_RELATION = 0.75;
+}
+
+
+PROCEDURE inquire() {
+	IF (#B stronger(?P) AS ?x) {
+		// try to influence the stronger players to be friendly
+		// towards the player
+		DROP ?x;
+		SAY [to=?P, type=$REQUEST, contents=#I relation(SELF, $ZERO, $ONE)];
+	}
+}
+
+
+PROCEDURE handleReply() {
+	// the replies are insignificant,
+}
+
+PROCEDURE handleNewMessage() {
+	WHEN [type=$REQUEST, from=?P, contents=#I relation(?p, ?l, ?u) AS ?c] {
+	 	IF (Q strengthOf(?P) >= Q strengthOf(SELF)) {
+	 		IF (#B relation(SELF, ?p, ?r) AS ?y) {
+	 	 		// the sender is stronger: try to honour the request,
+	 	 		// but don't reduce relations to an even stronger
+	 	 		// player
+	 	 		IF (Q strengthOf(?p) > Q strengthOf(?P)) {
+	 	 			IF (?u > ?r) {
+	 	 				DROP ?y;
+	 	 				ADOPT #B relation(SELF, ?p, ?u);
+	 	 			}
+				}
+				ELSE {
+					DROP ?y;
+					ADOPT #B relation(SELF, ?p, ?l);
+				}
+			}
+	 	 }
+
+		// always pretend to accept the request
+		SAY [to=?P, type=$ACCEPT, contents=?c];
+	}
+}
+
+
+PROCEDURE giveOrders() {
+	// calculate a new set of friendly players
+	XEQ resetFriends();
+	ADOPT #I makeNewEnemy();
+
+	IF (#B relation(SELF, ?P, ?R)) {
+		IF (?R < $ZERO) {
+			// don't make new enemies unless all relations are friendly
+			DROP #I makeNewEnemy();
+		}
+		ELSE {
+			XEQ registerFriend(?P);
+		}
+	}
+
+	IF (#I makeNewEnemy()) {
+	 	// select the weakest player if no other enemies exist
+	 	XEQ unregisterFriend(Q weakestOpponent());
+	}
+
+
+	IF (!XEQ attack(Q add(0.50, Q random(0.15)))) {
+		XEQ defend();
+	}
+}
+
+
+PROCEDURE updateStatus() {
+	WHEN NOTHING {
+		// pre-calculate the set of players which are stronger
+		// than the current player, and adjust relations accordingly
+		DROP #B stronger(_);
+		IF (#B relation(SELF, ?P, ?R) AS ?x,
+				Q strengthOf(?P) >= Q strengthOf(SELF)) {
+			IF (?R < $ZERO) {
+				DROP ?x;
+				ADOPT #B relation(SELF, ?P, Q add(?R, $QUART));
+			}
+			ADOPT #B stronger(?P);
+		}
+		RETURN;
+	}
+	WHEN [type=$PLAYER_ELIMINATED, contents=?X] {
+		DROP #B relation(SELF, ?X, _);
+		RETURN;
+	}
+	WHEN [type=$UNIT_ATTACKED, contents=?X] {
+		CALL adjustRelation(?X, $NEGHALF);
+		RETURN;
+	}
+	WHEN [type=$SUPPORT_CENTRE_ATTACKED, contents=?X] {
+		CALL adjustRelation(?X, -0.75);
+		RETURN;
+	}
+	WHEN [type=$SUPPORT_CENTRE_CONQUERED, contents=?X] {
+		CALL adjustRelation(?X, $NEGONE);
+		RETURN;
+	}
+}

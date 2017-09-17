@@ -1,0 +1,8 @@
+*~
+*.class
+*.jar
+build
+demo/Demo.class
+doc
+lib
+./players
